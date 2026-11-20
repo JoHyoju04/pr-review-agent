@@ -1,0 +1,135 @@
+# 대상 레포 루트에 두는 선택 설정. 없으면 아래 값이 기본값으로 쓰인다.
+
+detectors: 3          # N: 병렬 탐지기 수 (범용 관점은 로직·엣지케이스 / 동시성·자원 / API·계약 변경)
+verifiers: 3          # M: finding별 검증자 수
+pass_threshold: 2     # M명 중 real 최소 수
+max_findings: 10      # PR당 전체 게시 상한
+max_nits: 3           # PR당 nit 상한 (REVIEW.md에 적은 값보다 이 값이 우선)
+max_rounds: 3         # 라운드 상한. 넘기면 요약 코멘트 하나만 남기고 중단
+intensity: standard   # quick | standard | deep (detectors/verifiers/pass_threshold 프리셋)
+comment_language: ko
+
+# 보안 리뷰 (기본은 꺼짐)
+#
+# security_angles에 보안 관점을 적으면 범용 관점 위에 "덧붙는다". 범용 리뷰는 그대로 돈다.
+# 보안 finding은 범용과 다른 검증 체크를 받고(도달 가능성 / 기존 방어 존재 / 악용 영향),
+# 통과 기준도 다르다(security_pass_threshold, 기본은 전원 합의).
+#
+# security_angles:
+#   - authz           # 인증·인가 누락, IDOR, 권한 상승
+#   - injection       # SQL·커맨드·XSS·경로 조작·역직렬화·SSRF
+#   - data_exposure   # 시크릿 하드코딩, 민감정보 로깅, 취약한 암호화
+#   - config          # CORS·쿠키·CI 워크플로·컨테이너 권한·새 의존성 (선택)
+#
+# 관점 하나가 탐지 LLM 호출 하나다. 위 네 개를 다 켜면 호출이 3 -> 7회가 된다.
+# intensity는 보안 관점을 줄이지 않는다(quick에서도 그대로 돌고 추론 강도만 낮아진다).
+# 비용을 줄이려면 security_angles에서 관점을 빼세요.
+#
+# config 관점은 애플리케이션 코드가 아닌 파일(.github/workflows, Dockerfile, *.tf,
+# 의존성 목록)을 본다. 그런 파일이 PR에 섞이지 않는 레포에서는 빈 결과만 내고 호출 하나를
+# 버리므로 선택으로 두었다. 켤 때는 skip_paths가 그 파일들을 지우고 있지 않은지 확인하세요.
+#
+# angles: 돌릴 관점을 전부 직접 지정하는 탈출구. 적으면 detectors와 security_angles를
+#         무시한다. 범용 관점을 빼먹으면 로직·동시성·API 리뷰가 조용히 꺼지므로 보통
+#         security_angles를 쓰고, 보안만 돌려 보는 실험에만 angles를 쓴다.
+# angles: [authz, injection]   # 범용 리뷰가 꺼진다
+
+# 실행 게이트 (없으면 평가하지 않는다)
+#
+# skip_paths와 다르다. skip_paths는 이미 돈 리뷰의 결과를 버리는 finding 필터이고,
+# gate는 LLM을 아예 부르지 않는 실행 게이트다. 건너뛴 실행은 라운드를 쓰지 않으므로
+# 다음 푸시에서 다시 평가된다.
+#
+# 평가 순서가 중요하다. always_review가 skip_if_only보다 먼저다 — CI 워크플로,
+# Dockerfile, 의존성 목록은 "문서/설정"처럼 보이지만 보안상 최우선 대상이다.
+#   1. always_review에 걸리는 파일이 하나라도 있으면 건너뛰지 않는다
+#   2. deep_paths에 걸리면 intensity를 deep으로 올린다
+#   3. 변경 파일 전부가 skip_if_only면 건너뛴다
+#   4. 아니면 기본 강도로 본다
+#
+# gate:
+#   always_review:
+#     - .github/workflows/
+#     - Dockerfile
+#     - "*.tf"
+#     - "**/requirements*.txt"
+#   deep_paths:
+#     - "src/**/auth/"
+#     - "src/**/payment/"
+#   skip_if_only:
+#     - docs/
+#     - "*.md"
+
+# 선택 항목
+# summary_empty: "수정할 사항 없음"
+# max_parallel: 8      # LLM 동시 실행 상한
+# line_tolerance: 3    # 병합·중복 판정에 쓰는 라인 근접 허용치
+# skip_paths:          # REVIEW.md의 "건너뛸 경로"와 합쳐서 쓴다
+#   - build/
+#   - "*.lock"
+
+# 병합·중복 제거의 claim 유사도 게이트. 아래 기본값은 실제 PR 리뷰 결과 15쌍으로
+# 측정한 값이다(같은 버그 최저 0.243 / 다른 버그 최고 0.122). 코멘트 언어를 바꾸면
+# 문자 bigram의 기저 유사도가 달라지므로 다시 재야 한다.
+# merge_similarity: 0.16    # 1단(검증 전, 같은 category). 느슨하게
+# dedupe_similarity: 0.20   # 2단(검증 후, category 무시). 엄격하게
+# group_comments: true      # 같은 위치의 서로 다른 지적을 한 코멘트로 묶기
+
+# LLM 백엔드.
+#
+# backend: 커맨드 템플릿 프리셋을 고른다. codex | claude (기본: codex)
+# profile: 결정성 플래그와 인증 확인 방법을 정한다. local | ci
+#          (기본: CI / GITHUB_ACTIONS 환경변수가 있으면 ci, 없으면 local)
+#
+# 둘 다 CLI 플래그로 매 실행 덮어쓸 수 있다: `review run --backend claude --profile ci`.
+# 먼저 적힌 쪽이 이긴다.
+#   커맨드:     llm.command(프리셋 전체 무시) -> --backend -> llm.backend -> codex
+#   모델:       --model -> llm.model -> 백엔드 프리셋 기본값
+#   extra_args: llm.extra_args -> 백엔드·프로필 프리셋
+#
+# llm:
+#   backend: codex        # codex | claude
+#   profile: local        # 보통 적지 않는다. 자동 감지가 맞다
+#   model: gpt-5.6-terra  # 생략하면 백엔드 프리셋 기본값 (claude는 claude-opus-5-5)
+#   reasoning_effort: medium   # 생략하면 intensity가 정한다
+#   timeout: 900
+#   parse_retries: 1
+#   extra_args: ["--ignore-user-config"]   # 생략하면 프로필별 프리셋 값이 붙는다
+
+# 프리셋이 실제로 거는 커맨드와 플래그
+#
+# codex (codex-cli 0.167 기준)
+#   codex exec --sandbox read-only --cd {repo} --color never
+#     -c model={model} -c model_reasoning_effort={effort} -o {out} -
+#   extra_args  local: --ignore-user-config
+#               ci:    --ignore-user-config --ephemeral
+#   인증        local: `codex login` (ChatGPT 계정 = 구독 크레딧)
+#               ci:    `printenv OPENAI_API_KEY | codex login --with-api-key`
+#
+# claude (claude 2.1.322 기준)
+#   claude --print --output-format text --model {model} --effort {effort}
+#     --permission-prompts none --allowedTools <읽기 전용 집합>
+#     --disallowedTools Write,Edit,NotebookEdit,WebFetch,WebSearch {stdin}
+#   extra_args  local: --safe-mode
+#               ci:    --safe-mode --no-session-persistence
+#   인증        local: `claude auth login` (구독 크레딧)
+#               ci:    ANTHROPIC_API_KEY 또는 CLAUDE_CODE_OAUTH_TOKEN
+#
+# model과 reasoning_effort를 커맨드에 박는 이유: 안 주면 사용자의 개인 CLI 설정을
+# 상속해서, 앱에서 모델을 바꾸는 순간 리뷰 결과가 조용히 바뀐다. 같은 이유로
+# codex는 --ignore-user-config, claude는 --safe-mode를 프로필 기본값으로 붙인다.
+#
+# 자리표시자
+#   {repo}   -> 리뷰 대상 트리 경로로 치환 (PR head의 임시 worktree일 수 있다)
+#   {out}    -> 임시 파일 경로로 치환. CLI가 그 파일에 쓴 최종 메시지를 응답으로 쓴다
+#               (codex exec -o). 비어 있으면 stdout으로 되돌아간다.
+#   {model}  -> llm.model 로 치환
+#   {effort} -> llm.reasoning_effort 로 치환
+#   "-"      -> 프롬프트를 stdin으로 보낸다. 이 토큰은 argv에 남는다 (codex)
+#   {stdin}  -> 프롬프트를 stdin으로 보내고 토큰은 argv에서 제거한다 (claude)
+#   위 어느 것도 없으면 프롬프트를 마지막 인자로 붙인다.
+#
+# llm.command 를 직접 적으면 프리셋을 전부 무시하는 탈출구가 된다. 이때는 엔진이 어떤
+# CLI인지 알 수 없으므로 인증 확인(preflight)도 실행 파일 존재까지만 한다.
+# llm:
+#   command: ["my-llm", "--repo", "{repo}", "{stdin}"]

@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# 비밀값 — 절대 커밋하지 않는다. 인증은 codex / claude / gh CLI에 맡긴다.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.netrc
+.npmrc
+credentials
+credentials.*
+secrets.*
+*secret*.yaml
+*secret*.yml
+*secret*.json
+
+# 실행 산출물 — 리뷰 대상 코드와 LLM 응답이 들어 있다.
+#   .review-agent/  : 상태 DB(state.db) + 응답 캐시(cache/)
+#   review-agent-tree-*/ : REVIEW_AGENT_TMPDIR를 레포 안으로 지정한 경우의 임시 worktree
+.review-agent/
+review-agent-tree-*/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# 에디터 · OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

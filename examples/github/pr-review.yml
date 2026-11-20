@@ -1,0 +1,108 @@
+# 대상 레포의 .github/workflows/pr-review.yml 로 복사해서 쓰세요.
+#
+# 라운드 상태(.review-agent/state.db)는 실행 간에 남아 있어야 합니다. 남지 않으면
+# 매 실행이 라운드 1이 되어 이전 지적을 다시 올립니다. 아래는 actions/cache로
+# PR 번호별 상태를 이어 붙이는 예시입니다.
+#
+# 백엔드는 레포 변수 REVIEW_BACKEND 로 고릅니다 (Settings > Variables > Actions).
+#   codex  (기본): OPENAI_API_KEY 시크릿 필요
+#   claude       : ANTHROPIC_API_KEY 또는 CLAUDE_CODE_OAUTH_TOKEN 시크릿 필요
+# 변수를 두지 않으면 codex로 돕니다.
+
+name: PR Review Agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  # 같은 PR에 두 리뷰가 동시에 돌면 라운드 상태가 어긋납니다.
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      REVIEW_BACKEND: ${{ vars.REVIEW_BACKEND || 'codex' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # base...head diff를 계산하려면 전체 히스토리가 필요합니다.
+          fetch-depth: 0
+          # pull_request 이벤트의 기본 체크아웃은 "머지 커밋"입니다. 그대로 두면 CI는
+          # head + base 최신이 섞인 트리를 보고, 로컬 실행(PR head 기준)과 결과가 갈립니다.
+          # 인라인 코멘트의 commit_id도 head라서 라인 앵커가 어긋납니다.
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install review agent
+        run: pip install "git+https://github.com/<owner>/pr-review-agent@v0.1.0"
+
+      # 두 백엔드 모두 npm 전역 설치입니다.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # --- 백엔드 설치 + 인증. REVIEW_BACKEND 에 맞는 단계만 돕니다 --------------
+      #
+      # CI에서는 대화형 `codex login`을 할 수 없으므로 API 키 경로를 씁니다.
+      # `codex login --with-api-key`는 키를 stdin으로 읽어 CODEX_HOME에 저장합니다.
+      - name: Install Codex CLI
+        if: env.REVIEW_BACKEND == 'codex'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "OPENAI_API_KEY 시크릿이 없습니다. codex 백엔드에는 필요합니다." >&2
+            exit 1
+          fi
+          npm install -g @openai/codex
+          printenv OPENAI_API_KEY | codex login --with-api-key
+          codex login status
+
+      # claude는 환경변수를 그대로 읽으므로 로그인 단계가 없습니다. 설치만 하면 됩니다.
+      - name: Install Claude Code CLI
+        if: env.REVIEW_BACKEND == 'claude'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+            echo "ANTHROPIC_API_KEY 또는 CLAUDE_CODE_OAUTH_TOKEN 시크릿이 필요합니다." >&2
+            exit 1
+          fi
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      - name: Restore round state
+        uses: actions/cache@v4
+        with:
+          path: .review-agent
+          key: review-agent-${{ github.event.pull_request.number }}-${{ github.run_id }}
+          restore-keys: |
+            review-agent-${{ github.event.pull_request.number }}-
+
+      - name: Review pull request
+        env:
+          # 인라인 코멘트 게시는 gh CLI가 이 토큰으로 수행합니다.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 백엔드 인증값. 쓰지 않는 쪽은 비어 있어도 됩니다.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          review run \
+            --repo . \
+            --pr ${{ github.event.pull_request.number }} \
+            --state .review-agent/state.db \
+            --profile ci \
+            --backend "${REVIEW_BACKEND}" \
+            --post

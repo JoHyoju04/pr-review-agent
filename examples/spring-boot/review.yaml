@@ -1,0 +1,35 @@
+# Spring Boot 서비스용 예시 설정. 대상 레포 루트에 review.yaml로 두고 쓰세요.
+
+detectors: 3
+verifiers: 3
+pass_threshold: 2
+max_findings: 10
+max_nits: 3
+max_rounds: 3
+intensity: standard
+comment_language: ko
+
+# 보안 관점을 범용 3관점 위에 덧붙인다. 탐지 호출 3 -> 6회.
+# config 관점은 켜지 않았다 — 켜려면 아래 skip_paths의 gradle/wrapper/를 먼저 재검토해야
+# 한다 (wrapper jar 교체는 실제 공격 벡터인데 지금은 사전 필터가 그 지적을 버린다).
+security_angles:
+  - authz
+  - injection
+  - data_exposure
+
+skip_paths:
+  - src/main/generated/
+  - build/
+  - bin/
+  - gradle/wrapper/
+  - src/test/resources/   # data_exposure 관점의 테스트 픽스처 오탐 억제
+
+# 결정성: 백엔드·모델·추론 강도를 고정하고, 사용자 개인 Codex 설정 상속을 끊는다.
+# --ignore-user-config를 줘도 approval=never / sandbox=read-only 는 유지되고 인증도 정상이다.
+# profile은 적지 않는다 — 로컬은 local, GitHub Action은 ci로 자동 감지된다.
+# Claude로 한 번만 돌려 보려면 `review run --backend claude` 로 덮어쓴다.
+llm:
+  backend: codex
+  model: gpt-5.6-terra
+  reasoning_effort: medium
+  extra_args: ["--ignore-user-config"]
